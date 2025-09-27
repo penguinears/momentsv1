@@ -1,10 +1,9 @@
-<h1>made by leo</h1>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moments</title>
+  <title>Moments — Star Program</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -27,10 +26,10 @@
     function write(key,val){ localStorage.setItem(key,JSON.stringify(val)); }
 
     // ---- Auth ----
-    function createAccount(username,password){
+    function createAccount(username,password,isStar=false){
       const users=read(USERS_KEY);
       if(users[username]) throw new Error("username taken");
-      users[username]={username,password,id:uid(),friends:[]};
+      users[username]={username,password,id:uid(),friends:[],isStar};
       write(USERS_KEY,users);
     }
     function signIn(username,password){
@@ -60,17 +59,16 @@
       const [messages,setMessages]=useState(read(MESSAGES_KEY));
       const channelRef=useRef(null);
 
-      // ✅ Restore session if already signed in
+      // restore session
       useEffect(()=>{
         const session=currentSession();
         if(session?.username){
           const users=read(USERS_KEY);
-          if(users[session.username]){
-            setUser(users[session.username]);
-          }
+          if(users[session.username]) setUser(users[session.username]);
         }
       },[]);
 
+      // broadcast for local multi-tab testing
       useEffect(()=>{
         channelRef.current=new BroadcastChannel("moments_channel");
         channelRef.current.onmessage=(e)=>{
@@ -84,22 +82,30 @@
               return m;
             });
           }
+          if(e.data.type==="timelines_update"){
+            setTimelines(read(TIMELINES_KEY));
+          }
         };
         return ()=>channelRef.current.close();
       },[]);
+
+      function saveTimelines(updated){
+        setTimelines(updated); write(TIMELINES_KEY,updated);
+        if(channelRef.current) channelRef.current.postMessage({type:"timelines_update"});
+      }
 
       function handleCreateTimeline(name,iconFile){
         const reader=new FileReader();
         reader.onload=()=>{
           const newT={id:uid(),name,owner:user.username,posts:[],locked:false,icon:reader.result};
           const updated={...timelines,[newT.id]:newT};
-          setTimelines(updated); write(TIMELINES_KEY,updated);
+          saveTimelines(updated);
         };
-        if(iconFile){reader.readAsDataURL(iconFile);}
+        if(iconFile) reader.readAsDataURL(iconFile);
         else{
           const newT={id:uid(),name,owner:user.username,posts:[],locked:false,icon:null};
           const updated={...timelines,[newT.id]:newT};
-          setTimelines(updated); write(TIMELINES_KEY,updated);
+          saveTimelines(updated);
         }
       }
 
@@ -107,20 +113,20 @@
         const t={...timelines[tid]};
         t.posts.push({id:uid(),owner:user.username,type,content,created:Date.now()});
         const updated={...timelines,[tid]:t};
-        setTimelines(updated); write(TIMELINES_KEY,updated);
+        saveTimelines(updated);
       }
 
       function handleDeletePost(tid,pid){
         const t={...timelines[tid], posts: timelines[tid].posts.filter(p=>p.id!==pid)};
         const updated={...timelines,[tid]:t};
-        setTimelines(updated); write(TIMELINES_KEY,updated);
+        saveTimelines(updated);
       }
 
       function toggleLock(tid){
         const t={...timelines[tid]};
         t.locked=!t.locked;
         const updated={...timelines,[tid]:t};
-        setTimelines(updated); write(TIMELINES_KEY,updated);
+        saveTimelines(updated);
       }
 
       function sendMessage(to,text){
@@ -135,63 +141,115 @@
         m[to][user.username].push(msg);
 
         setMessages(m); write(MESSAGES_KEY,m);
-        channelRef.current.postMessage({type:"message",to,from:user.username, msg});
+        if(channelRef.current) channelRef.current.postMessage({type:"message",to,from:user.username,msg});
       }
 
       return user
-        ? <Dashboard user={user} setUser={setUser} view={view} setView={setView} timelines={timelines} setTimelines={setTimelines} messages={messages} sendMessage={sendMessage} handleCreateTimeline={handleCreateTimeline} handleAddPost={handleAddPost} handleDeletePost={handleDeletePost} toggleLock={toggleLock} />
+        ? <Dashboard user={user} setUser={setUser} view={view} setView={setView} timelines={timelines} messages={messages} sendMessage={sendMessage} handleCreateTimeline={handleCreateTimeline} handleAddPost={handleAddPost} handleDeletePost={handleDeletePost} toggleLock={toggleLock} />
         : <AuthPanel setUser={setUser} />;
     }
 
-    // ---- Components ----
+    // ---- Auth Panel with Star Program flow ----
     function AuthPanel({setUser}){
       const [mode,setMode]=useState("signin");
       const [u,setU]=useState(""),[p,setP]=useState(""),[err,setErr]=useState("");
+      const [isStar,setIsStar]=useState(false);
+      const [showWarning,setShowWarning]=useState(false);
+
       function submit(e){ e.preventDefault();
         try{
-          if(mode==="signup") createAccount(u,p);
+          if(mode==="signup"){
+            if(isStar){
+              // show warning modal and require confirmation
+              setShowWarning(true);
+              return;
+            }
+            createAccount(u,p,false);
+          }
           signIn(u,p);
           setUser(currentSession());
-        }catch(e){setErr(e.message);}
-      }
+        }catch(e){setErr(e.message);}      }
+
+      function confirmStarSignup(){
+        try{
+          createAccount(u,p,true);
+          signIn(u,p);
+          setUser(currentSession());
+          setShowWarning(false);
+        }catch(e){setErr(e.message); setShowWarning(false);}      }
+
       return(
-        <div className="p-6 bg-white rounded-xl shadow max-w-md mx-auto mt-20">
+        <div className="p-6 bg-white rounded-xl shadow max-w-md mx-auto mt-12">
           <h2 className="text-xl font-bold mb-3">{mode==="signin"?"Sign In":"Create Account"}</h2>
           <form onSubmit={submit} className="space-y-2">
             <input className="w-full p-2 border rounded" placeholder="username" value={u} onChange={e=>setU(e.target.value)} />
             <input className="w-full p-2 border rounded" placeholder="password" type="password" value={p} onChange={e=>setP(e.target.value)} />
+            {mode==="signup" && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={isStar} onChange={e=>setIsStar(e.target.checked)} />
+                Join the Star Program (public visibility for unlocked posts)
+              </label>
+            )}
             {err && <div className="text-red-600 text-sm">{err}</div>}
             <button className="w-full px-3 py-2 bg-slate-900 text-white rounded">{mode==="signin"?"Sign in":"Sign up"}</button>
           </form>
+
           <button onClick={()=>setMode(mode==="signin"?"signup":"signin")} className="w-full mt-3 px-3 py-2 border rounded">{mode==="signin"?"Need an account? Sign up":"Have an account? Sign in"}</button>
+
+          {/* Warning modal for Star Program signup */}
+          {showWarning && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
+              <div className="bg-white rounded p-4 max-w-md w-full">
+                <h3 className="font-bold mb-2">Star Program — public visibility</h3>
+                <p className="text-sm mb-3">By joining the Star Program, any timeline posts you leave unlocked will be visible to everyone (this site is local-only for testing, but unlocked posts are public to all users on this device). Are you sure you want to continue?</p>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={()=>setShowWarning(false)} className="px-3 py-1 border rounded">Cancel</button>
+                  <button onClick={confirmStarSignup} className="px-3 py-1 bg-amber-500 text-black rounded">Yes, join Star Program</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )
     }
 
+    // ---- Dashboard with tabs: Timelines / Feed / Chat / Family / Memory Lane ----
     function Dashboard({user,setUser,view,setView,timelines,messages,sendMessage,handleCreateTimeline,handleAddPost,handleDeletePost,toggleLock}){
       return(
-        <div className="p-4 max-w-5xl mx-auto">
+        <div className="p-4 max-w-6xl mx-auto">
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 gap-3">
-            <h1 className="text-2xl font-bold">Moments</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold">Moments</h1>
+              <span className="text-sm text-slate-500">Made by Leo</span>
+            </div>
             <div className="flex gap-3 items-center">
-              <div>Hello, <b>{user.username}</b></div>
+              <div className="hidden sm:block">Hello, <b>{user.username}</b>{user.isStar?" ⭐":""}</div>
               <button onClick={()=>{signOut();setUser(null)}} className="px-2 py-1 border rounded">Sign out</button>
             </div>
           </div>
-          <div className="flex sm:gap-6 flex-col sm:flex-row">
-            <div className="flex sm:flex-col gap-2 sm:w-40 w-full mb-4 sm:mb-0">
-              <button onClick={()=>setView("timelines")} className={`px-3 py-2 rounded ${view==="timelines"?"bg-slate-900 text-white":"border"}`}>Timelines</button>
-              <button onClick={()=>setView("family")} className={`px-3 py-2 rounded ${view==="family"?"bg-slate-900 text-white":"border"}`}>Family</button>
-            </div>
-            <div className="flex-1">
+
+          <div className="flex flex-col sm:flex-row gap-4">
+            <nav className="flex sm:flex-col gap-2 sm:w-48 w-full">
+              <button onClick={()=>setView("timelines")} className={`px-3 py-2 rounded text-left ${view==="timelines"?"bg-slate-900 text-white":"border"}`}>Timelines</button>
+              <button onClick={()=>setView("feed")} className={`px-3 py-2 rounded text-left ${view==="feed"?"bg-slate-900 text-white":"border"}`}>Feed</button>
+              <button onClick={()=>setView("chat")} className={`px-3 py-2 rounded text-left ${view==="chat"?"bg-slate-900 text-white":"border"}`}>Chat</button>
+              <button onClick={()=>setView("family")} className={`px-3 py-2 rounded text-left ${view==="family"?"bg-slate-900 text-white":"border"}`}>Family</button>
+              <button onClick={()=>setView("memory")} className={`px-3 py-2 rounded text-left ${view==="memory"?"bg-slate-900 text-white":"border"}`}>Memory Lane</button>
+            </nav>
+
+            <main className="flex-1">
               {view==="timelines" && <Timelines user={user} timelines={timelines} handleCreateTimeline={handleCreateTimeline} handleAddPost={handleAddPost} handleDeletePost={handleDeletePost} toggleLock={toggleLock} />}
+              {view==="feed" && <Feed user={user} timelines={timelines} />}
+              {view==="chat" && <Chat user={user} messages={messages} sendMessage={sendMessage} />}
               {view==="family" && <Family user={user} timelines={timelines} messages={messages} sendMessage={sendMessage} />}
-            </div>
+              {view==="memory" && <MemoryLane user={user} timelines={timelines} />}
+            </main>
           </div>
         </div>
       )
     }
 
+    // ---- Timelines (unchanged behaviour, keep lock control) ----
     function Timelines({user,timelines,handleCreateTimeline,handleAddPost,handleDeletePost,toggleLock}){
       const [name,setName]=useState("");
       const [iconFile,setIconFile]=useState(null);
@@ -216,17 +274,19 @@
       const [file,setFile]=useState(null);
       const [open,setOpen]=useState(false);
       return(
-        <div className="bg-white p-4 rounded-xl shadow">
+        <div className="bg-white p-4 rounded-xl shadow mb-4">
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-2 cursor-pointer" onClick={()=>setOpen(!open)}>
-              {timeline.icon && <img src={timeline.icon} alt="" className="w-6 h-6 rounded-full" />}
-              <h3 className="font-bold">{timeline.name}</h3>
-              <span className="text-sm text-slate-500">{open?"▲":"▼"}</span>
+              {timeline.icon && <img src={timeline.icon} alt="" className="w-8 h-8 rounded-full" />}
+              <div>
+                <h3 className="font-bold">{timeline.name}</h3>
+                <div className="text-xs text-slate-500">{timeline.owner}</div>
+              </div>
             </div>
             {isOwner && (
-              <button onClick={()=>toggleLock(timeline.id)} className="text-sm px-2 py-1 border rounded">
-                {timeline.locked?"🔒":"🔓"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>toggleLock(timeline.id)} className="text-sm px-2 py-1 border rounded">{timeline.locked?"🔒 Private":"🔓 Unlocked"}</button>
+              </div>
             )}
           </div>
           {open && (
@@ -241,7 +301,8 @@
                   </div>
                 </div>
               )}
-              <div className="flex gap-6 overflow-x-auto pb-4">
+
+              <div className="flex gap-4 overflow-x-auto pb-4">
                 {timeline.posts.map((p)=><PostCard key={p.id} p={p} isOwner={isOwner} timelineId={timeline.id} handleDeletePost={handleDeletePost} />)}
               </div>
             </>
@@ -253,7 +314,7 @@
     function PostCard({p,isOwner,timelineId,handleDeletePost}){
       return(
         <div className="relative z-10 flex-shrink-0 min-w-[220px]">
-          <div className="bg-white border rounded-xl p-3 shadow text-sm">
+          <div className={`bg-white border rounded-xl p-3 shadow text-sm ${p.type==="text"?"max-w-xs":""}`}>
             <div className="flex justify-between items-center mb-1 text-xs text-slate-500">
               <span>{p.owner} • {new Date(p.created).toLocaleString()}</span>
               {isOwner && <button onClick={()=>handleDeletePost(timelineId,p.id)} className="text-red-600 text-xs">✕</button>}
@@ -269,6 +330,83 @@
       )
     }
 
+    // ---- Feed: shows ALL unlocked timelines (public) and family/friends priority indicator ----
+    function Feed({user,timelines}){
+      const users=read(USERS_KEY);
+      const myFriends=getFriends(user.username);
+      const allVisible=Object.values(timelines).filter(t=>!t.locked);
+      return(
+        <div>
+          <h2 className="text-xl font-semibold mb-4">Feed (Unlocked posts)</h2>
+          {allVisible.length===0 && <div className="text-slate-500">No unlocked posts yet.</div>}
+          <div className="grid gap-3">
+            {allVisible.map(t=> (
+              <div key={t.id} className="bg-white p-3 rounded shadow">
+                <div className="flex justify-between items-center mb-2">
+                  <div>
+                    <div className="font-bold">{t.name} <span className="text-xs text-slate-500">by {t.owner}</span></div>
+                    <div className="text-xs text-slate-400">{myFriends.includes(t.owner)?"Friend":"Public"}{users[t.owner]?.isStar?" • Star":""}</div>
+                  </div>
+                </div>
+                <div className="flex gap-3 overflow-x-auto">
+                  {t.posts.map(p=>(
+                    <div key={p.id} className="min-w-[220px]">
+                      <div className="bg-slate-50 p-3 rounded">
+                        {p.type==="text"?p.content:(p.content.name)}
+                        <div className="text-xs text-slate-400 mt-2">{new Date(p.created).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    // ---- Chat as its own page (optimized for phone) ----
+    function Chat({user,messages,sendMessage}){
+      const users=read(USERS_KEY);
+      const others=Object.keys(users).filter(u=>u!==user.username);
+      const [selected,setSelected]=useState(others[0]||null);
+      const [text,setText]=useState("");
+
+      useEffect(()=>{
+        if(!selected && others[0]) setSelected(others[0]);
+      },[users]);
+
+      return(
+        <div className="flex flex-col sm:flex-row gap-4">
+          <aside className="w-full sm:w-48 bg-white rounded shadow p-2 max-h-[60vh] overflow-y-auto">
+            <h4 className="font-semibold mb-2">Contacts</h4>
+            {others.map(o=>(
+              <div key={o} className={`p-2 rounded cursor-pointer ${selected===o?"bg-slate-100":""}`} onClick={()=>setSelected(o)}>{o}{users[o]?.isStar?" ⭐":""}</div>
+            ))}
+          </aside>
+
+          <section className="flex-1 bg-white rounded shadow p-3 flex flex-col">
+            {selected ? (
+              <>
+                <div className="flex-1 overflow-y-auto mb-2 max-h-[60vh]">
+                  {(messages[selected]||[]).map((m,i)=>(
+                    <div key={i} className={`mb-2 ${m.from===selected?"text-left":"text-right"}`}>
+                      <div className="inline-block px-3 py-1 rounded text-sm bg-slate-100">{m.from}: {m.text}</div>
+                    </div>
+                  ))}
+                </div>
+                <form onSubmit={e=>{e.preventDefault(); if(text){sendMessage(selected,text); setText("");}}} className="flex gap-2">
+                  <input className="flex-1 border rounded p-2" placeholder="Message..." value={text} onChange={e=>setText(e.target.value)} />
+                  <button className="px-3 py-1 bg-slate-900 text-white rounded">Send</button>
+                </form>
+              </>
+            ) : <div className="text-slate-500">No contact selected</div>}
+          </section>
+        </div>
+      )
+    }
+
+    // ---- Family (uses friends list) ----
     function Family({user,timelines,messages,sendMessage}){
       const users=read(USERS_KEY);
       const myFriends=getFriends(user.username);
@@ -281,17 +419,23 @@
         <div>
           <h2 className="text-xl font-semibold mb-4">Family</h2>
           <input className="w-full border p-2 rounded mb-4" placeholder="Search users..." value={search} onChange={e=>setSearch(e.target.value)} />
+
           <ul className="space-y-2 mb-6">
             {others.map(u=><li key={u} className="bg-white p-3 rounded shadow flex justify-between">
-              <span>{u}</span>
+              <span>{u}{users[u]?.isStar?" ⭐":""}</span>
               <button onClick={()=>add(u)} className="px-2 py-1 border rounded">Add Family</button>
             </li>)}
           </ul>
+
           <h3 className="font-bold mb-2">Your Family</h3>
-          {myFriends.map(f=><FamilyMember key={f} me={user.username} friend={f} timelines={timelines} messages={messages[user.username]?.[f]||[]} sendMessage={sendMessage} />)}
+          {myFriends.length===0 && <div className="text-slate-500">No family yet.</div>}
+          {myFriends.map(f=> <FamilyMember key={f} me={user.username} friend={f} timelines={timelines} messages={messages[meOrUser(user.username)]?.[f]||[]} sendMessage={sendMessage} />)}
         </div>
       )
     }
+
+    // helper to avoid lint confusion in template above
+    function meOrUser(u){ return u }
 
     function FamilyMember({me,friend,timelines,messages,sendMessage}){
       const friendTimelines=Object.values(timelines).filter(t=>t.owner===friend && !t.locked);
@@ -300,7 +444,7 @@
         <div className="mb-6">
           <h4 className="font-semibold mb-2">{friend}'s Timelines</h4>
           {friendTimelines.length===0 && <div className="text-slate-500 mb-4">No visible timelines.</div>}
-          {friendTimelines.map(tl=><Timeline key={tl.id} timeline={tl} isOwner={false} />)}
+          {friendTimelines.map(tl=> <Timeline key={tl.id} timeline={tl} isOwner={false} />)}
 
           <h4 className="font-semibold mt-4 mb-2">Chat with {friend}</h4>
           <div className="bg-white rounded shadow p-2 max-h-60 overflow-y-auto mb-2">
@@ -318,10 +462,31 @@
       )
     }
 
+    // ---- Memory Lane ----
+    function MemoryLane({user,timelines}){
+      const today=new Date();
+      const memories=[];
+      Object.values(timelines).forEach(t=>{
+        t.posts?.forEach(p=>{
+          const d=new Date(p.created);
+          if(d.getDate()===today.getDate() && d.getMonth()===today.getMonth()) memories.push({...p,timeline:t.name});
+        })
+      });
+      return(
+        <div>
+          <h2 className="text-xl font-semibold mb-4">Memory Lane</h2>
+          {memories.length===0 && <div className="text-slate-500">No memories today.</div>}
+          {memories.map((m,i)=>(
+            <div key={i} className="bg-white p-3 rounded shadow mb-2">
+              <div className="text-xs text-slate-500">From {m.timeline}</div>
+              <div>{m.type==="text"?m.content:m.content.name}</div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
     ReactDOM.createRoot(document.getElementById("root")).render(<MomentsApp/>);
   </script>
 </body>
 </html>
-```
-
-
