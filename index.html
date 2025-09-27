@@ -400,8 +400,11 @@
         <div className="bg-white p-4 rounded-xl shadow mb-4">
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-2">
-              <button aria-label={open?"Close timeline":"Open timeline"} onClick={()=>setOpen(!open)} className="p-2 rounded hover:bg-slate-100">
-                {open ? "◀" : "▶"}
+              <button aria-label={open?"Close timeline":"Open timeline"} onClick={()=>setOpen(!open)} className="p-2 rounded hover:bg-slate-100 transform transition-transform duration-200">
+                {/* Sleeker SVG chevron instead of plain arrows */}
+                <svg className={`w-5 h-5 text-slate-700 transform transition-transform duration-200 ${open?"rotate-180":""}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"></path>
+                </svg>
               </button>
               <div className="flex items-center gap-2 cursor-pointer" onClick={()=>setOpen(!open)}>
                 {timeline.icon && <img src={timeline.icon} alt="" className="w-10 h-10 rounded-full" />}
@@ -432,8 +435,32 @@
                 </div>
               )}
 
-              <div className="flex gap-4 overflow-x-auto pb-4">
-                {timeline.posts.map((p)=><PostCard key={p.id} p={p} isOwner={isOwner} timelineId={timeline.id} handleDeletePost={handleDeletePost} />)}
+              {/* NEW: Vertical timeline style with a connecting line and dots */}
+              <div className="relative pl-8">
+                {/* vertical line */}
+                <div className="absolute left-4 top-6 bottom-0 w-0.5 bg-slate-300"></div>
+
+                <div className="space-y-6">
+                  {timeline.posts.map((p)=>(
+                    <div key={p.id} className="relative">
+                      {/* dot */}
+                      <div className="absolute -left-6 top-3 w-3 h-3 bg-slate-900 rounded-full ring-2 ring-white"></div>
+
+                      <div className="bg-white p-3 rounded-xl shadow">
+                        <div className="flex justify-between items-center mb-1 text-xs text-slate-500">
+                          <span>{p.owner} • {new Date(p.created).toLocaleString()}</span>
+                          {isOwner && <button onClick={()=>handleDeletePost(timeline.id,p.id)} className="text-red-600 text-xs">✕</button>}
+                        </div>
+                        {p.type==="text" && <div>{p.content}</div>}
+                        {p.type==="file" && (
+                          p.content.type.startsWith("image") ?
+                            <img src={p.content.url} alt="" className="w-full h-48 object-cover rounded" /> :
+                            <video src={p.content.url} controls className="w-full h-48 rounded" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </>
           )}
