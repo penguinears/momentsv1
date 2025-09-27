@@ -16,145 +16,183 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    // Paste the React component code from earlier here
-    // (I’ll shrink it down slightly so it runs in-browser without TypeScript)
+    const { useState, useEffect } = React;
+    const uid = () => Math.random().toString(36).slice(2,9);
 
-    const { useState, useEffect, useRef } = React;
-
-    const uid = () => Math.random().toString(36).slice(2, 9);
-
-    async function hashPassword(password) {
-      if (!window.crypto?.subtle) return password;
-      const enc = new TextEncoder().encode(password);
-      const digest = await crypto.subtle.digest("SHA-256", enc);
-      return Array.from(new Uint8Array(digest))
-        .map(b => b.toString(16).padStart(2, "0"))
-        .join("");
-    }
-
-    // LocalStorage account management
+    // Local auth
     const USERS_KEY = "moments_users";
     const SESSION_KEY = "moments_session";
+    const TIMELINES_KEY = "moments_timelines";
 
-    function readUsers() {
-      try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; }
-      catch { return {}; }
-    }
-    function writeUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
-
-    async function createAccount(username, password) {
-      const users = readUsers();
-      if (users[username]) throw new Error("username taken");
-      users[username] = { username, passwordHash: await hashPassword(password), id: uid() };
+    function readUsers(){ try{return JSON.parse(localStorage.getItem(USERS_KEY))||{}}catch{return{}} }
+    function writeUsers(u){ localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+    async function createAccount(username,password){
+      const users=readUsers();
+      if(users[username]) throw new Error("username taken");
+      users[username]={username,password,id:uid()};
       writeUsers(users);
     }
-    async function signIn(username, password) {
-      const users = readUsers();
-      if (!users[username]) throw new Error("no such user");
-      if (await hashPassword(password) !== users[username].passwordHash) throw new Error("wrong password");
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ username }));
+    async function signIn(username,password){
+      const users=readUsers();
+      if(!users[username]) throw new Error("no such user");
+      if(users[username].password!==password) throw new Error("wrong password");
+      localStorage.setItem(SESSION_KEY,JSON.stringify({username}));
       return users[username];
     }
-    function signOut() { localStorage.removeItem(SESSION_KEY); }
-    function currentSession() {
-      try { return JSON.parse(localStorage.getItem(SESSION_KEY)); }
-      catch { return null; }
-    }
+    function signOut(){ localStorage.removeItem(SESSION_KEY); }
+    function currentSession(){ try{return JSON.parse(localStorage.getItem(SESSION_KEY))}catch{return null;} }
 
-    // Simple in-memory posts (instead of IndexedDB for demo)
-    const POSTS_KEY = "moments_posts";
-    function readPosts() {
-      try { return JSON.parse(localStorage.getItem(POSTS_KEY)) || []; }
-      catch { return []; }
-    }
-    function writePosts(p) { localStorage.setItem(POSTS_KEY, JSON.stringify(p)); }
+    // Timelines storage
+    function readTimelines(){ try{return JSON.parse(localStorage.getItem(TIMELINES_KEY))||{}}catch{return{}} }
+    function writeTimelines(t){ localStorage.setItem(TIMELINES_KEY,JSON.stringify(t)); }
 
-    function MomentsApp() {
-      const [user, setUser] = useState(currentSession());
-      const [posts, setPosts] = useState(readPosts());
+    function MomentsApp(){
+      const [user,setUser]=useState(currentSession());
+      const [view,setView]=useState("timelines"); // dashboard nav
+      const [timelines,setTimelines]=useState(readTimelines());
 
-      function handleCreatePost(text) {
-        const newPost = { id: uid(), text, owner: user.username, created: Date.now() };
-        const updated = [newPost, ...posts];
-        setPosts(updated);
-        writePosts(updated);
+      function handleCreateTimeline(name){
+        const newT={id:uid(),name,owner:user.username,posts:[]};
+        const updated={...timelines,[newT.id]:newT};
+        setTimelines(updated);
+        writeTimelines(updated);
       }
 
-      function AuthPanel() {
-        const [mode, setMode] = useState("signin");
-        const [u, setU] = useState("");
-        const [p, setP] = useState("");
-        const [err, setErr] = useState("");
+      function handleAddPost(tid,content,type){
+        const t={...timelines[tid]};
+        t.posts.unshift({id:uid(),owner:user.username,type,content,created:Date.now()});
+        const updated={...timelines,[tid]:t};
+        setTimelines(updated);
+        writeTimelines(updated);
+      }
 
-        async function submit(e) {
-          e.preventDefault();
-          try {
-            if (mode === "signup") {
-              await createAccount(u, p);
-            }
-            await signIn(u, p);
+      // ---- Components ----
+      function AuthPanel(){
+        const [mode,setMode]=useState("signin");
+        const [u,setU]=useState(""),[p,setP]=useState(""),[err,setErr]=useState("");
+        async function submit(e){ e.preventDefault();
+          try{
+            if(mode==="signup") await createAccount(u,p);
+            await signIn(u,p);
             setUser(currentSession());
-          } catch (e) { setErr(e.message); }
+          }catch(e){setErr(e.message);}
         }
-
-        return (
-          <div className="p-6 bg-white rounded-xl shadow">
-            <h2 className="text-xl font-bold mb-3">
-              {mode === "signin" ? "Sign In" : "Create Account"}
-            </h2>
+        return(
+          <div className="p-6 bg-white rounded-xl shadow max-w-md mx-auto mt-20">
+            <h2 className="text-xl font-bold mb-3">{mode==="signin"?"Sign In":"Create Account"}</h2>
             <form onSubmit={submit} className="space-y-2">
               <input className="w-full p-2 border rounded" placeholder="username" value={u} onChange={e=>setU(e.target.value)} />
               <input className="w-full p-2 border rounded" placeholder="password" type="password" value={p} onChange={e=>setP(e.target.value)} />
               {err && <div className="text-red-600 text-sm">{err}</div>}
               <div className="flex gap-2">
-                <button className="px-3 py-1 bg-slate-900 text-white rounded" type="submit">{mode === "signin" ? "Sign in" : "Sign up"}</button>
-                <button type="button" className="px-3 py-1 border rounded" onClick={()=>setMode(mode==="signin"?"signup":"signin")}>
-                  Switch to {mode === "signin" ? "Sign up" : "Sign in"}
-                </button>
+                <button className="px-3 py-1 bg-slate-900 text-white rounded" type="submit">{mode==="signin"?"Sign in":"Sign up"}</button>
+                <button type="button" onClick={()=>setMode(mode==="signin"?"signup":"signin")} className="px-3 py-1 border rounded">Switch</button>
               </div>
             </form>
           </div>
-        );
+        )
       }
 
-      function PostForm() {
-        const [text, setText] = useState("");
-        return (
-          <form onSubmit={e=>{e.preventDefault(); handleCreatePost(text); setText("");}} className="bg-white p-4 rounded-xl shadow mb-4">
-            <textarea className="w-full p-2 border rounded" placeholder="What's happening?" value={text} onChange={e=>setText(e.target.value)} />
-            <button type="submit" className="mt-2 px-3 py-1 bg-slate-900 text-white rounded">Post</button>
-          </form>
-        );
-      }
-
-      function PostCard({p}) {
-        return (
-          <div className="bg-white p-4 rounded-xl shadow mb-3">
-            <div className="text-sm text-slate-500">{p.owner} • {new Date(p.created).toLocaleString()}</div>
-            <div className="mt-2">{p.text}</div>
-          </div>
-        );
-      }
-
-      return (
-        <div className="max-w-2xl mx-auto p-6">
-          <h1 className="text-2xl font-bold mb-6">🌸 Moments</h1>
-          {!user && <AuthPanel />}
-          {user && (
-            <>
-              <div className="mb-4 flex justify-between items-center">
+      function Dashboard(){
+        return(
+          <div className="p-6 max-w-5xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h1 className="text-2xl font-bold">Moments</h1>
+              <div className="flex gap-3 items-center">
                 <div>Hello, <b>{user.username}</b></div>
-                <button onClick={()=>{signOut(); setUser(null);}} className="px-2 py-1 border rounded">Sign out</button>
+                <button onClick={()=>{signOut();setUser(null)}} className="px-2 py-1 border rounded">Sign out</button>
               </div>
-              <PostForm />
-              <div>
-                {posts.length===0 && <div className="text-slate-500">No posts yet.</div>}
-                {posts.map(p=><PostCard key={p.id} p={p} />)}
+            </div>
+            <div className="flex gap-6">
+              <div className="w-40 flex flex-col gap-2">
+                <button onClick={()=>setView("timelines")} className={`px-3 py-2 rounded ${view==="timelines"?"bg-slate-900 text-white":"border"}`}>Timelines</button>
+                <button onClick={()=>setView("family")} className={`px-3 py-2 rounded ${view==="family"?"bg-slate-900 text-white":"border"}`}>Family</button>
               </div>
-            </>
-          )}
-        </div>
-      );
+              <div className="flex-1">
+                {view==="timelines" && <Timelines />}
+                {view==="family" && <Family />}
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      function Timelines(){
+        const [name,setName]=useState("");
+        const myT=Object.values(timelines).filter(t=>t.owner===user.username);
+        return(
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Your Timelines</h2>
+            <div className="flex gap-2 mb-4">
+              <input className="flex-1 p-2 border rounded" placeholder="New timeline name" value={name} onChange={e=>setName(e.target.value)} />
+              <button onClick={()=>{if(name){handleCreateTimeline(name);setName("");}}} className="px-3 py-1 bg-slate-900 text-white rounded">Create</button>
+            </div>
+            {myT.length===0 && <div className="text-slate-500">No timelines yet.</div>}
+            <div className="grid gap-4">
+              {myT.map(t=><Timeline key={t.id} timeline={t} />)}
+            </div>
+          </div>
+        )
+      }
+
+      function Timeline({timeline}){
+        const [text,setText]=useState("");
+        const [note,setNote]=useState("");
+        const [file,setFile]=useState(null);
+
+        function addPost(type,content){
+          handleAddPost(timeline.id,content,type);
+          setText("");setNote("");setFile(null);
+        }
+
+        return(
+          <div className="bg-white p-4 rounded-xl shadow">
+            <h3 className="font-bold mb-2">{timeline.name}</h3>
+            <form onSubmit={e=>{e.preventDefault(); if(text) addPost("text",text);}} className="mb-3">
+              <textarea className="w-full border p-2 rounded mb-2" placeholder="Write something..." value={text} onChange={e=>setText(e.target.value)} />
+              <div className="flex gap-2">
+                <button type="submit" className="px-3 py-1 bg-slate-900 text-white rounded">Add Text</button>
+                <input type="file" onChange={e=>setFile(e.target.files[0])} />
+                <button type="button" onClick={()=>file && addPost("file",{name:file.name,type:file.type,url:URL.createObjectURL(file)})} className="px-3 py-1 border rounded">Upload</button>
+              </div>
+            </form>
+            <div className="max-h-60 overflow-y-auto space-y-3">
+              {timeline.posts.map(p=><PostCard key={p.id} p={p} />)}
+            </div>
+          </div>
+        )
+      }
+
+      function PostCard({p}){
+        return(
+          <div className="border rounded p-2">
+            <div className="text-xs text-slate-500">{p.owner} • {new Date(p.created).toLocaleString()}</div>
+            {p.type==="text" && <div className="mt-1">{p.content}</div>}
+            {p.type==="file" && (
+              p.content.type.startsWith("image") ?
+                <img src={p.content.url} alt="" className="mt-2 max-h-40 object-cover"/> :
+                <video src={p.content.url} controls className="mt-2 max-h-40" />
+            )}
+          </div>
+        )
+      }
+
+      function Family(){
+        const users=Object.keys(readUsers()).filter(u=>u!==user.username);
+        return(
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Family (Other Accounts)</h2>
+            {users.length===0 && <div className="text-slate-500">No other accounts found (create another one in a new tab).</div>}
+            <ul className="space-y-2">
+              {users.map(u=><li key={u} className="bg-white p-3 rounded shadow flex justify-between"><span>{u}</span><button className="px-2 py-1 border rounded">Add Friend</button></li>)}
+            </ul>
+          </div>
+        )
+      }
+
+      return(
+        user?<Dashboard />:<AuthPanel />
+      )
     }
 
     ReactDOM.createRoot(document.getElementById("root")).render(<MomentsApp />);
