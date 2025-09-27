@@ -1,4 +1,4 @@
-```html
+<h1>made by leo</h1>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -54,13 +54,22 @@
 
     // ---- App ----
     function MomentsApp(){
-      // clear any stale session when app loads
-      useEffect(()=>{ signOut(); },[]);
       const [user,setUser]=useState(null);
       const [view,setView]=useState("timelines");
       const [timelines,setTimelines]=useState(read(TIMELINES_KEY));
       const [messages,setMessages]=useState(read(MESSAGES_KEY));
       const channelRef=useRef(null);
+
+      // ✅ Restore session if already signed in
+      useEffect(()=>{
+        const session=currentSession();
+        if(session?.username){
+          const users=read(USERS_KEY);
+          if(users[session.username]){
+            setUser(users[session.username]);
+          }
+        }
+      },[]);
 
       useEffect(()=>{
         channelRef.current=new BroadcastChannel("moments_channel");
