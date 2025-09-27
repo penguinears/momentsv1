@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moments</title>
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // Paste the React component code from earlier here
+    // (I’ll shrink it down slightly so it runs in-browser without TypeScript)
+
+    const { useState, useEffect, useRef } = React;
+
+    const uid = () => Math.random().toString(36).slice(2, 9);
+
+    async function hashPassword(password) {
+      if (!window.crypto?.subtle) return password;
+      const enc = new TextEncoder().encode(password);
+      const digest = await crypto.subtle.digest("SHA-256", enc);
+      return Array.from(new Uint8Array(digest))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+    }
+
+    // LocalStorage account management
+    const USERS_KEY = "moments_users";
+    const SESSION_KEY = "moments_session";
+
+    function readUsers() {
+      try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; }
+      catch { return {}; }
+    }
+    function writeUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+
+    async function createAccount(username, password) {
+      const users = readUsers();
+      if (users[username]) throw new Error("username taken");
+      users[username] = { username, passwordHash: await hashPassword(password), id: uid() };
+      writeUsers(users);
+    }
+    async function signIn(username, password) {
+      const users = readUsers();
+      if (!users[username]) throw new Error("no such user");
+      if (await hashPassword(password) !== users[username].passwordHash) throw new Error("wrong password");
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ username }));
+      return users[username];
+    }
+    function signOut() { localStorage.removeItem(SESSION_KEY); }
+    function currentSession() {
+      try { return JSON.parse(localStorage.getItem(SESSION_KEY)); }
+      catch { return null; }
+    }
+
+    // Simple in-memory posts (instead of IndexedDB for demo)
+    const POSTS_KEY = "moments_posts";
+    function readPosts() {
+      try { return JSON.parse(localStorage.getItem(POSTS_KEY)) || []; }
+      catch { return []; }
+    }
+    function writePosts(p) { localStorage.setItem(POSTS_KEY, JSON.stringify(p)); }
+
+    function MomentsApp() {
+      const [user, setUser] = useState(currentSession());
+      const [posts, setPosts] = useState(readPosts());
+
+      function handleCreatePost(text) {
+        const newPost = { id: uid(), text, owner: user.username, created: Date.now() };
+        const updated = [newPost, ...posts];
+        setPosts(updated);
+        writePosts(updated);
+      }
+
+      function AuthPanel() {
+        const [mode, setMode] = useState("signin");
+        const [u, setU] = useState("");
+        const [p, setP] = useState("");
+        const [err, setErr] = useState("");
+
+        async function submit(e) {
+          e.preventDefault();
+          try {
+            if (mode === "signup") {
+              await createAccount(u, p);
+            }
+            await signIn(u, p);
+            setUser(currentSession());
+          } catch (e) { setErr(e.message); }
+        }
+
+        return (
+          <div className="p-6 bg-white rounded-xl shadow">
+            <h2 className="text-xl font-bold mb-3">
+              {mode === "signin" ? "Sign In" : "Create Account"}
+            </h2>
+            <form onSubmit={submit} className="space-y-2">
+              <input className="w-full p-2 border rounded" placeholder="username" value={u} onChange={e=>setU(e.target.value)} />
+              <input className="w-full p-2 border rounded" placeholder="password" type="password" value={p} onChange={e=>setP(e.target.value)} />
+              {err && <div className="text-red-600 text-sm">{err}</div>}
+              <div className="flex gap-2">
+                <button className="px-3 py-1 bg-slate-900 text-white rounded" type="submit">{mode === "signin" ? "Sign in" : "Sign up"}</button>
+                <button type="button" className="px-3 py-1 border rounded" onClick={()=>setMode(mode==="signin"?"signup":"signin")}>
+                  Switch to {mode === "signin" ? "Sign up" : "Sign in"}
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      }
+
+      function PostForm() {
+        const [text, setText] = useState("");
+        return (
+          <form onSubmit={e=>{e.preventDefault(); handleCreatePost(text); setText("");}} className="bg-white p-4 rounded-xl shadow mb-4">
+            <textarea className="w-full p-2 border rounded" placeholder="What's happening?" value={text} onChange={e=>setText(e.target.value)} />
+            <button type="submit" className="mt-2 px-3 py-1 bg-slate-900 text-white rounded">Post</button>
+          </form>
+        );
+      }
+
+      function PostCard({p}) {
+        return (
+          <div className="bg-white p-4 rounded-xl shadow mb-3">
+            <div className="text-sm text-slate-500">{p.owner} • {new Date(p.created).toLocaleString()}</div>
+            <div className="mt-2">{p.text}</div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="max-w-2xl mx-auto p-6">
+          <h1 className="text-2xl font-bold mb-6">🌸 Moments</h1>
+          {!user && <AuthPanel />}
+          {user && (
+            <>
+              <div className="mb-4 flex justify-between items-center">
+                <div>Hello, <b>{user.username}</b></div>
+                <button onClick={()=>{signOut(); setUser(null);}} className="px-2 py-1 border rounded">Sign out</button>
+              </div>
+              <PostForm />
+              <div>
+                {posts.length===0 && <div className="text-slate-500">No posts yet.</div>}
+                {posts.map(p=><PostCard key={p.id} p={p} />)}
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<MomentsApp />);
+  </script>
+</body>
+</html>
